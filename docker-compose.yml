@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  web:
+    # Build image từ Dockerfile trong thư mục hiện tại
+    build: .
+    # Đặt tên cho container để dễ quản lý
+    container_name: vul-scanner-app
+    # Ánh xạ port 8501 của máy host vào port 8501 của container
+    ports:
+      - "8501:8501"
+    # Tự động khởi động lại container nếu bị lỗi hoặc khi khởi động lại máy
+    restart: unless-stopped
