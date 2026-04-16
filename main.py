@@ -5,6 +5,7 @@ import logging
 from scanner.port_scanner import scan_ports
 from scanner.web_scanner import check_security_headers, enumerate_directories
 from scanner.subdomain_scanner import enumerate_subdomains
+from scanner.ssl_scanner import check_ssl_certificate
 
 # Cấu hình logging
 logging.basicConfig(
@@ -33,6 +34,7 @@ enable_port_scan = st.sidebar.checkbox("🔌 Bật Quét Cổng (Port Scan)", va
 port_range = st.sidebar.text_input("Gõ danh sách Port:", value="21, 22, 23, 80, 443, 3306, 8080", help="Các port cách nhau bởi dấu phẩy")
 
 enable_header_scan = st.sidebar.checkbox("🌐 Kiểm tra HTTP Security Headers", value=True)
+enable_ssl_scan = st.sidebar.checkbox("🔒 Kiểm tra Chứng Chỉ SSL/TLS", value=True)
 enable_dir_scan = st.sidebar.checkbox("📂 Dò Thư Mục Web (Dir Fuzzing)", value=False)
 enable_subdomain_scan = st.sidebar.checkbox("🔍 Dò Tên Miền Phụ (Subdomains)", value=False)
 
@@ -54,7 +56,7 @@ if start_scan:
         main_logger.info("===============================================")
         
         # Tabs hiển thị kết quả (Giao diện đa nhiệm)
-        tab1, tab2, tab3, tab4 = st.tabs(["🔌 Kết Quả Port", "🌐 Báo Cáo HTTP", "📂 Thư Mục Khám Phá", "🔍 Tên Miền Phụ"])
+        tab1, tab5, tab2, tab3, tab4 = st.tabs(["🔌 Theo Dõi Port", "🔒 SSL/TLS", "🌐 Header HTTP", "📂 Khám Phá File", "🔍 Miền Phụ"])
         
         # 1. Quét Cổng (Port Scanning)
         with tab1:
@@ -76,11 +78,60 @@ if start_scan:
                             
                             for p in open_ports:
                                 export_logs.append({"Loại Lỗ Hổng": "Port Mở", "Giá Trị": f"Port: {p}", "Trạng thái": "MỞ"})
+                                
+                            st.markdown("### 🕵️ Banners & Tra Cứu Lỗ Hổng (CVE)")
+                            with st.spinner("Đang kết nối nhận dạng dịch vụ (Banner Grabbing)..."):
+                                from scanner.banner_scanner import analyze_banners
+                                banner_results = analyze_banners(port_results['ip'], open_ports)
+                                
+                                for r in banner_results:
+                                    bn = r['banner']
+                                    if not bn.startswith("Không nhận diện được"):
+                                        st.write(f"- **Port {r['port']}**: `{bn}`")
+                                        export_logs.append({"Loại Lỗ Hổng": "Banner/Version Dịch Vụ", "Giá Trị": bn, "Trạng thái": "THÔNG TIN"})
+                                        if r['nvd_url']:
+                                            st.markdown(f"  👉 [Tra cứu mã lỗ hổng (CVE) cho `{bn}` trên NVD]({r['nvd_url']})")
+                                    else:
+                                        st.write(f"- **Port {r['port']}**: *(Không rò rỉ phiên bản ứng dụng)*")
                         else:
                             st.success("Tên miền này đang phòng thủ tốt, không phát hiện cổng nào mở.")
             else:
                 st.write("Module quét cổng đang tắt.")
                 
+        # Xử lý Phân tích SSL/TLS
+        with tab5:
+            if enable_ssl_scan:
+                with st.spinner("Đang phân tích Chứng chỉ Bảo mật..."):
+                    ssl_results = check_ssl_certificate(target)
+                    
+                    if ssl_results.get("error") and not ssl_results.get("vulnerabilities"):
+                        st.error(f"Lỗi truy xuất SSL: {ssl_results['error']}")
+                    else:
+                        if ssl_results['is_valid']:
+                            st.success(f"Kết nối SSL khả dụng! Giao thức: **{ssl_results['protocol']}**")
+                        else:
+                            st.warning(f"Chứng chỉ có vấn đề xác thực: {ssl_results.get('error', 'Không hợp lệ')}")
+                            
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown("### 📜 Thông Tin Cấp Phát")
+                            st.info(
+                                f"**Tên Miền Đăng Ký (Subject):**\n\n{ssl_results['subject']}\n\n"
+                                f"**Tổ Chức Cấp Chứng Chỉ (Issuer):**\n\n{ssl_results['issuer']}\n\n"
+                                f"**Thời gian Hết Hạn:**\n\n{ssl_results['expires_on']} *(Còn lại {ssl_results['days_left']} ngày)*"
+                            )
+                        with col2:
+                            st.markdown("### ⚠️ Đánh Giá An Toàn")
+                            vulns = ssl_results.get('vulnerabilities', [])
+                            if vulns:
+                                for v in vulns:
+                                    st.error(f"Rủi ro: {v}")
+                                    export_logs.append({"Loại Lỗ Hổng": "Rủi Ro SSL/TLS", "Giá Trị": v, "Trạng thái": "CẢNH BÁO"})
+                            else:
+                                st.success("Không phát hiện lỗ hổng hay giao thức lỗi thời (TLS/SSL).")
+            else:
+                st.write("Kiểm tra chứng chỉ SSL/TLS đang bị vô hiệu hóa.")
+
         # 2. Xử lý Phân tích HTTP
         with tab2:
             if enable_header_scan:
