@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   web:
     # Build image từ Dockerfile trong thư mục hiện tại
